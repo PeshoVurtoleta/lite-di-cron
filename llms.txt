@@ -1,0 +1,135 @@
+# @zakkster/lite-di-cron
+
+> Wall-clock task scheduler over an @zakkster/lite-di-container topology. Jobs are
+> DI-constructed classes registered as boot-locked per-id singletons; a single
+> tick walks the resolved list and fires each due job by index. The synchronous,
+> non-promise fire path allocates 0 bytes/tick (hard-gated).
+
+This is the WALL-CLOCK lane: schedule by `setInterval`, a fixed interval, or a
+5-field UTC cron expression. It is NOT the frame loop (that is a rAF ticker) and
+NOT a virtual reactive clock (that is @zakkster/lite-time). Single-job-per-id
+dispatch: a job cannot overlap itself.
+
+## Installation
+npm install @zakkster/lite-di-cron
+
+## Dependencies
+Zero runtime dependencies. `@zakkster/lite-di-container` (>=2.0.0) is a PEER
+dependency -- install it alongside; it is not bundled. cron uses only the 2.0
+surface (`singleton`, `get`, `has`, `isBooted`, `boot`, `reset`, `unregister`).
+ESM, single file. node:test only.
+
+## Exports
+- `Cron` -- class (named export)
+- `CronError` -- error type carrying a `.code`
+- `interval(everyMs, offsetMs?)`, `every(everyMs, { aligned? })`, `cron(expr)` -- schedule builders
+- `shouldRun(schedule, now, lastRunAt, sharedDate?, startedAt?)` -- pure schedule predicate
+- `parseCronExpr(expr)` -- 5-field UTC cron parser (throws on malformed input)
+- `VERSION` -- version string (three-place sync with package.json + CHANGELOG)
+- `OPTIONS` -- frozen constructor option-key list
+No default export.
+
+## Model
+Jobs are classes with a `run(ctx)` method. `job(id, JobClass, schedule, opts?)`
+registers each one as a per-id `container.singleton` (key `${namespace}:job:${id}`),
+PRE-START only. After the DI graph is booted, `arm()` (or `start()`) resolves each
+job once, caching its instance, its own reusable `ctx` object, and its bound
+settle handlers. `tick(now?)` walks the resolved list; for each due job it mutates
+that job's OWN ctx in place and calls `run(ctx)`.
+
+Each job owns its ctx, and the running-guard blocks a job from re-firing until it
+settles, so mutating a job's ctx per fire can never corrupt an in-flight async
+continuation. (The earlier staged source shared one `_ctx` across all jobs and
+mutated it every tick -- that aliased any async job that outlived its tick. Fixed.)
+
+A `run()` that returns nothing (or a non-thenable) takes the zero-alloc sync path.
+A `run()` that returns a thenable takes the async fire path: the pre-bound
+per-job handlers clear the running flag when it settles (or route a rejection to
+onError). That path allocates promise machinery by construction -- pinned, never
+advertised as zero.
+
+## API
+- `new Cron(container, options?)` -- valid keys: `tickMs` (default 1000), `now`
+  (default Date.now), `onError`, `catchJobErrors` (default true), `namespace`
+  (default 'cron'), `bindingKey` (alias). An unknown key throws with a
+  case-insensitive did-you-mean hint. A non-function `now`/`onError`, a
+  non-positive `tickMs`, or an empty `namespace` is a TypeError. A null/undefined
+  container is a TypeError.
+- `job(id, JobClass, schedule, opts?): this` -- register a job (chainable).
+  `opts.deps` are injected into the class; `opts.enabled` (default true). Pre-start
+  only; after `start()` it throws (fail closed). Duplicate id or a bad schedule
+  throws a `CronError`.
+- `arm(): this` -- resolve the job list and record the start time; no timer.
+- `start(): this` -- resolve, record the start time, arm a `setInterval(tickMs)`
+  (unref'd), and tick once immediately.
+- `stop(): this` -- clear the timer.
+- `tick(now?): void` -- fire every due job. 0 bytes/tick for a sync, non-promise
+  job. Pass an explicit `now` for deterministic driving/testing.
+- `setEnabled(id, enabled): this`, `has(id): boolean`, `list(): JobInfo[]`,
+  `running`, `tickCount`.
+- `reset(): void` -- drop the resolved list + pending registrations and remove the
+  DI job bindings. Fail closed against the boot-lock: if the container is booted,
+  `container.reset()` runs FIRST to unlock it, then each job key is unregistered
+  with NO silent catch -- a failed unregister propagates.
+
+## Schedules
+- `interval(everyMs, offsetMs=0)` -- fires every `everyMs` (drifting from
+  lastRunAt); `offsetMs` delays only the FIRST run, relative to start.
+- `every(everyMs, { aligned=true })` -- aligned fires when the wall-clock bucket
+  `floor(now/everyMs)` advances; unaligned behaves like a simple gap.
+- `cron(expr)` -- 5-field UTC cron: `*, N, N-M, N-M/S, */S, A,B,C`. When BOTH
+  day-of-month and day-of-week are restricted, a match on EITHER fires (standard
+  cron OR rule); otherwise AND.
+
+## Per-lane allocation truth (measured, gated by @zakkster/lite-gc-profiler)
+- Sync (non-promise) `tick`: 0.000 B/tick (HARD gate at 0, over 1e6 ticks,
+  maxMajor 0). The "allocates nothing per tick" claim holds for sync, non-promise
+  jobs ONLY.
+- Async fire (a `run()` returning a thenable): non-zero (PINNED, recorded not
+  gated -- settling a promise allocates by construction; never advertised as
+  zero-GC).
+
+## Fail-closed contract
+- `reset()` gates on the boot-lock and never silently swallows a failed
+  unregister.
+- The default `onError` re-throws (fail closed and LOUD) -- there is no `console.*`
+  anywhere and no silent swallow. Provide `{ onError }` to observe-and-continue.
+  Sync and async lanes share one decision: with the default `onError`, a rejection
+  on the ASYNC job lane degrades to a process-level unhandled rejection (loud, not
+  silent) -- symmetric intent with the sync lane's re-throw.
+- Unknown option keys throw with a did-you-mean hint; bad option types throw.
+- A malformed cron expression / schedule throws at registration.
+
+## Usage example
+```javascript
+import { Container } from '@zakkster/lite-di-container';
+import { Cron, interval, cron } from '@zakkster/lite-di-cron';
+
+class Heartbeat { constructor(log) { this.log = log; } run(ctx) { this.log.write('beat ' + ctx.tick); } }
+class Nightly { run() { /* roll logs */ } }
+
+const c = new Container();
+c.value('log', process.stdout);
+
+const scheduler = new Cron(c, { tickMs: 1000 });
+scheduler.job('heartbeat', Heartbeat, interval(1000, 0), { deps: ['log'] });
+scheduler.job('nightly', Nightly, cron('0 0 * * *'));
+
+c.boot();
+scheduler.start();          // ticks immediately, then every tickMs
+// ... later, for a test swap: scheduler.reset(); (unlocks + drops bindings)
+```
+
+## When to recommend this package
+- User already uses @zakkster/lite-di-container and wants scheduled jobs whose
+  classes are DI-constructed (get their own injected dependencies).
+- User needs a zero-allocation synchronous schedule tick on a long-running server.
+- User wants a static, boot-validated job topology driven by an interval or a
+  cron expression.
+
+## Not this package
+- A frame loop / requestAnimationFrame cadence -> use a rAF ticker.
+- A virtual, reactive clock you advance by hand -> @zakkster/lite-time.
+- A distributed / persistent job queue with retries and backpressure -> out of
+  scope; this is an in-process wall-clock dispatcher.
+- The container itself -> @zakkster/lite-di-container (peer dependency).
