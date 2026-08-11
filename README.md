@@ -325,7 +325,16 @@ Numbers reproduce with `node --expose-gc test/torture.mjs` (gated by
   fire lane, T7 soak (200 reset cycles + a 1e6-tick `maxMajor<=0` soak, lite-leak
   retention + heap bound), T9 controls (each gate proven able to fail:
   `DI_ASCII_BREAK`, `DI_ALLOC_BREAK`, `DI_TORTURE_BREAK`).
-- `npm run verify` -- both, in order. `prepublishOnly` runs `verify`.
+- `npm run example` -- [`examples/scheduled-jobs.mjs`](examples/scheduled-jobs.mjs): a
+  shipped, self-verifying reference consumer. A scheduled-jobs service with DI-constructed
+  jobs on interval / aligned-bucket / UTC-cron schedules, driven DETERMINISTICALLY by an
+  injected clock + explicit `tick(now)` (no real timers). It asserts the exact firing
+  sequence, `setEnabled` skipping, the `start`/`stop`/`running`/`tickCount` timer lane,
+  the pure `shouldRun`/`parseCronExpr` helpers, `CronError` codes (duplicate id, malformed
+  cron), onError job-error isolation, `reset()` unlocking the boot-lock, and the
+  fail-closed construction guards -- all with `node:assert`, so a broken contract exits
+  non-zero. It is the downstream proof that the 1.0.0 API works in anger.
+- `npm run verify` -- all three, in order. `prepublishOnly` runs `verify`.
 
 ## What this is not
 

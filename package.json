@@ -18,7 +18,8 @@
   "scripts": {
     "test": "node --expose-gc --test test/*.test.js",
     "torture": "node --expose-gc test/torture.mjs",
-    "verify": "npm test && npm run torture",
+    "example": "node examples/scheduled-jobs.mjs",
+    "verify": "npm test && npm run torture && npm run example",
     "prepublishOnly": "npm run verify"
   },
   "files": [
@@ -28,7 +29,8 @@
     "llms.txt",
     "CHANGELOG.md",
     "COOKBOOK.md",
-    "README.md"
+    "README.md",
+    "examples/scheduled-jobs.mjs"
   ],
   "keywords": [
     "cron",
