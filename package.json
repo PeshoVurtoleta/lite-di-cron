@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-di-cron",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
   "description": "Wall-clock task scheduler over an @zakkster/lite-di-container topology: DI-constructed jobs registered as boot-locked per-id singletons, fired by index on an interval / every / cron-expr schedule. Zero allocation on the synchronous, non-promise tick path.",
   "type": "module",

@@ -218,7 +218,7 @@ cron(expr: string): CronSchedule
 
 | Export    | Type                | Meaning                                             |
 | --------- | ------------------- | --------------------------------------------------- |
-| `VERSION` | `string`            | Three-place-synced version (`1.0.0-alpha.1`).       |
+| `VERSION` | `string`            | Three-place-synced version (`1.0.0`).       |
 | `OPTIONS` | `readonly string[]` | Frozen list of the only valid constructor options.  |
 
 ## Composability with the container

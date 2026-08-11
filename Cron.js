@@ -17,7 +17,7 @@
  * in one commit or not at all.
  * @type {string}
  */
-export const VERSION = '1.0.0-alpha.1';
+export const VERSION = '1.0.0';
 
 /**
  * The only accepted constructor option keys. Frozen so an unknown key is an
